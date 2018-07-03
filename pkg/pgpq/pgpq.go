@@ -17,6 +17,8 @@ type Queue struct {
   JobsCount int
   IsLocked bool
   MinPriority int
+  CreatedAt *time.Time
+  UpdatedAt *time.Time
 }
 
 type Job struct {
@@ -65,7 +67,7 @@ func StartServer() {
   var err error
 
   fmt.Printf("Connecting to store.\n")
-  store, err = NewPostgresJobStore(notifs)
+  store, err = NewPostgresJobStore()
   if err != nil {
     panic(err)
   }

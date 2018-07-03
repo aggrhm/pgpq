@@ -4,7 +4,9 @@ CREATE TABLE queues (
   capacity      integer NOT NULL,
   jobs_count    integer DEFAULT 0,
   is_locked     boolean DEFAULT FALSE,
-  min_priority  integer
+  min_priority  integer,
+  created_at    timestamp NOT NULL,
+  updated_at    timestamp NOT NULL
 );
 
 CREATE TABLE jobs (
