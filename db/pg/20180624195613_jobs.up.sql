@@ -4,16 +4,16 @@ CREATE TABLE queues (
   capacity      integer NOT NULL,
   jobs_count    integer DEFAULT 0,
   is_locked     boolean DEFAULT FALSE,
-  min_priority  integer,
+  min_priority  bigint,
   created_at    timestamp NOT NULL,
   updated_at    timestamp NOT NULL
 );
 
-CREATE TABLE jobs (
+CREATE UNLOGGED TABLE jobs (
   id            bigserial PRIMARY KEY,
   queue_name    varchar(100) NOT NULL,
   quid          varchar(200) NOT NULL,
-  priority      integer NOT NULL,
+  priority      bigint NOT NULL,
   data          jsonb,
   state         integer NOT NULL,
   state_changed_at  timestamp,

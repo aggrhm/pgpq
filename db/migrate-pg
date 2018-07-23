@@ -1,0 +1,7 @@
+#!/bin/bash
+
+if [ "$1" = "create" ]; then
+  migrate create -ext .sql -dir ./pg $2
+else
+	migrate -database "$TJ_PGPQ_URL" -path ./pg "$@"
+fi

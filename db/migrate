@@ -1,3 +1,0 @@
-#!/bin/bash
-
-migrate -database "$PGPQ_POSTGRES_URL" -path pg_migrate $1
