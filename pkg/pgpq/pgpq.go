@@ -11,7 +11,7 @@ import (
 )
 
 type Queue struct {
-  Id int
+  ID int
   Name string
   Capacity int
   JobsCount int
@@ -22,7 +22,7 @@ type Queue struct {
 }
 
 type Job struct {
-  Id int64            `json:"id"`
+  ID int64            `json:"id"`
   QueueName string  `json:"queue_name"`
   Quid string       `json:"quid"`
   Priority int64      `json:"priority"`

@@ -38,7 +38,7 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
   if err != nil {
     if err == sql.ErrNoRows {
       // create new queue
-      err = s.db.QueryRow("INSERT INTO queues(name, capacity, created_at, updated_at) VALUES($1, $2, $3, $3) RETURNING id, name, is_locked", job.QueueName, 100000, time.Now()).Scan(&queue.Id, &queue.Name, &queue.IsLocked)
+      err = s.db.QueryRow("INSERT INTO queues(name, capacity, created_at, updated_at) VALUES($1, $2, $3, $3) RETURNING id, name, is_locked", job.QueueName, 100000, time.Now()).Scan(&queue.ID, &queue.Name, &queue.IsLocked)
       if err != nil {
         return PGToAPIError(err, "")
       }
@@ -53,12 +53,12 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
 
   // insert row
   job_updated := false
-  err = s.db.QueryRow("INSERT INTO jobs(queue_name, quid, priority, data, state, created_at) VALUES($1, $2, $3, $4, $5, $6) RETURNING id", job.QueueName, job.Quid, job.Priority, job.Data, job.State, job.CreatedAt).Scan(&job.Id)
+  err = s.db.QueryRow("INSERT INTO jobs(queue_name, quid, priority, data, state, created_at) VALUES($1, $2, $3, $4, $5, $6) RETURNING id", job.QueueName, job.Quid, job.Priority, job.Data, job.State, job.CreatedAt).Scan(&job.ID)
   if err != nil {
     pe := err.(*pq.Error)
     if pe.Code.Name() == "unique_violation" {
       // if already in queue, update
-      err = s.db.QueryRow("UPDATE jobs SET priority=$1, data=$2 WHERE queue_name=$3 AND quid=$4 RETURNING id", job.Priority, job.Data, job.QueueName, job.Quid).Scan(&job.Id)
+      err = s.db.QueryRow("UPDATE jobs SET priority=$1, data=$2 WHERE queue_name=$3 AND quid=$4 RETURNING id", job.Priority, job.Data, job.QueueName, job.Quid).Scan(&job.ID)
       if err != nil {
         return PGToAPIError(err, "")
       }
@@ -90,7 +90,7 @@ func (s * PostgresJobStore) PeekJobs(count int) ([]Job, error) {
   defer rows.Close()
   for rows.Next() {
     j := Job{}
-    err := rows.Scan(&j.Id, &j.QueueName, &j.Quid, &j.Priority, &j.Data, &j.State, &j.CreatedAt)
+    err := rows.Scan(&j.ID, &j.QueueName, &j.Quid, &j.Priority, &j.Data, &j.State, &j.CreatedAt)
     if err != nil {
       return nil, PGToAPIError(err, "")
     }
@@ -113,7 +113,7 @@ func (s * PostgresJobStore) DequeueJobs(queue_name string, count int) ([]Job, er
   defer rows.Close()
   for rows.Next() {
     j := Job{}
-    err := rows.Scan(&j.Id, &j.QueueName, &j.Quid, &j.Priority, &j.Data)
+    err := rows.Scan(&j.ID, &j.QueueName, &j.Quid, &j.Priority, &j.Data)
     if err != nil {
       return nil, PGToAPIError(err, "Job scan error: ")
     }
@@ -128,7 +128,7 @@ func (s * PostgresJobStore) DequeueJobs(queue_name string, count int) ([]Job, er
 
 func (s * PostgresJobStore) ReleaseJob(id int64) error {
   job := Job{}
-  err := s.db.QueryRow("DELETE FROM jobs WHERE id=$1 RETURNING id, queue_name", id).Scan(&job.Id, &job.QueueName)
+  err := s.db.QueryRow("DELETE FROM jobs WHERE id=$1 RETURNING id, queue_name", id).Scan(&job.ID, &job.QueueName)
   if err != nil {
     return PGToAPIError(err, "")
   }
@@ -177,7 +177,7 @@ func (s *PostgresJobStore) updateQueueStatus(queue_name string) error {
     return PGToAPIError(err, "")
   }
   // lock queue
-  err = tx.QueryRow("SELECT id FROM queues WHERE name=$1 AND updated_at < $2 FOR UPDATE NOWAIT", queue_name, time.Now().Add(-10 * time.Second)).Scan(&queue.Id)
+  err = tx.QueryRow("SELECT id FROM queues WHERE name=$1 AND updated_at < $2 FOR UPDATE NOWAIT", queue_name, time.Now().Add(-10 * time.Second)).Scan(&queue.ID)
   if err != nil {
     return PGToAPIError(err, "")
   }
@@ -189,7 +189,7 @@ func (s *PostgresJobStore) updateQueueStatus(queue_name string) error {
   if err != nil { return PGToAPIError(err, "") }
 
   // write count, priority to queue
-  err = tx.QueryRow("UPDATE queues SET jobs_count=$1, min_priority=$2, is_locked=($1 >= capacity), updated_at=$3 WHERE id=$4 RETURNING name, is_locked, jobs_count, min_priority", count, minp, time.Now(), queue.Id).Scan(&queue.Name, &queue.IsLocked, &queue.JobsCount, &queue.MinPriority)
+  err = tx.QueryRow("UPDATE queues SET jobs_count=$1, min_priority=$2, is_locked=($1 >= capacity), updated_at=$3 WHERE id=$4 RETURNING name, is_locked, jobs_count, min_priority", count, minp, time.Now(), queue.ID).Scan(&queue.Name, &queue.IsLocked, &queue.JobsCount, &queue.MinPriority)
   if err != nil { return PGToAPIError(err, "") }
 
   // commit
