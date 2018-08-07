@@ -32,6 +32,30 @@ type Job struct {
   CreatedAt *time.Time `json:"created_at,omitempty"`
 }
 
+func (j *Job) SetData(d map[string]interface{}) error {
+  bytes, err := json.Marshal(d)
+  if err != nil { return err }
+  str := string(bytes)
+  j.Data = &str
+  return nil
+}
+
+func (j *Job) GetDataMap() map[string]interface{} {
+  ret := make(map[string]interface{})
+  if j.Data == nil { return ret }
+  err := json.Unmarshal([]byte(*j.Data), &ret)
+  if err != nil { return ret }
+  return ret
+}
+
+func (j *Job) GetDataInterface() interface{} {
+  var ret interface{}
+  if j.Data == nil { return nil }
+  err := json.Unmarshal([]byte(*j.Data), &ret)
+  if err != nil { return nil }
+  return ret
+}
+
 type JobStore interface {
   EnqueueJob(job *Job) error
   PeekJobs(count int) ([]Job, error)

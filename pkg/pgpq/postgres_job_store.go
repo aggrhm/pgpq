@@ -22,6 +22,8 @@ func NewPostgresJobStore(url string) (*PostgresJobStore,error) {
   if err != nil {
     return nil, err
   }
+  err = pgdb.Ping()
+  if err != nil { return nil, fmt.Errorf("PostgresJobStore: Could not establish connection with database (%s)", err) }
   store.db = pgdb
   return &store, nil
 }

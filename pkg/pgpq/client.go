@@ -29,6 +29,9 @@ func (c *Client) EnqueueJob(job *Job) error {
 	data.Set("queue_name", job.QueueName)
 	data.Set("quid", job.Quid)
 	data.Set("priority", strconv.FormatInt(job.Priority, 10))
+	if job.Data != nil {
+		data.Set("data", *job.Data)
+	}
 	resp, err := hc.PostForm(url, data)
 	if err != nil {
 		return err
