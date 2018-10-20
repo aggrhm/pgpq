@@ -30,7 +30,9 @@ func (c *Client) EnqueueJob(job *Job) error {
 	data.Set("quid", job.Quid)
 	data.Set("priority", strconv.FormatInt(job.Priority, 10))
 	if job.Data != nil {
-		data.Set("data", *job.Data)
+		djs, err := json.Marshal(job.Data)
+		if err != nil { return err }
+		data.Set("data", string(djs))
 	}
 	resp, err := hc.PostForm(url, data)
 	if err != nil {
