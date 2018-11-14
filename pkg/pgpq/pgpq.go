@@ -141,6 +141,7 @@ func EnqueueJobHandler(w http.ResponseWriter, r *http.Request) {
 		err := job.ParseDataJSON(ds)
 		if err != nil {
 			result.Error = &APIError{Message: "Could not parse data json.", Type: "InvalidParam"}
+			return
 		}
 	}
 	job.State = 10

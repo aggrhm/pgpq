@@ -222,7 +222,8 @@ func (s *PostgresJobStore) updateQueueStatus(queue_name string) error {
   if err != nil { return PGToAPIError(err, "Could not fetch job count.") }
 
   // write count, priority to queue
-  err = tx.QueryRow("UPDATE queues SET jobs_count=$1, min_priority=$2, is_locked=($1 >= capacity), updated_at=$3 WHERE id=$4 RETURNING name, is_locked, jobs_count, min_priority", count, minp, time.Now(), queue.ID).Scan(&queue.Name, &queue.IsLocked, &queue.JobsCount, &queue.MinPriority)
+	tn := time.Now(); queue.UpdatedAt = &tn
+  err = tx.QueryRow("UPDATE queues SET jobs_count=$1, min_priority=$2, is_locked=($1 >= capacity), updated_at=$3 WHERE id=$4 RETURNING name, is_locked, jobs_count, min_priority", count, minp, *queue.UpdatedAt, queue.ID).Scan(&queue.Name, &queue.IsLocked, &queue.JobsCount, &queue.MinPriority)
   if err != nil { return PGToAPIError(err, "Could not update queue status.") }
 
   // commit
