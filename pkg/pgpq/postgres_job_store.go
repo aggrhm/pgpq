@@ -1,10 +1,19 @@
 package pgpq
 
 import (
+	"os"
   "fmt"
   "time"
   "database/sql"
   "github.com/lib/pq"
+  "github.com/pkg/errors"
+	"github.com/golang-migrate/migrate"
+	migrate_pg "github.com/golang-migrate/migrate/database/postgres"
+	_ "github.com/golang-migrate/migrate/source/file"
+)
+
+const (
+	PostgresDBVersion = 20180624195613
 )
 
 type PostgresJobStore struct {
@@ -25,6 +34,7 @@ func NewPostgresJobStore(url string) (*PostgresJobStore,error) {
   err = pgdb.Ping()
   if err != nil { return nil, fmt.Errorf("PostgresJobStore: Could not establish connection with database (%s)", err) }
   store.db = pgdb
+
   return &store, nil
 }
 
@@ -190,7 +200,7 @@ func (s *PostgresJobStore) ManageQueues() error {
   fmt.Printf("Listening for updates.\n")
   for {
     qn = <-s.notifs
-    fmt.Printf("Notification received.\n")
+    //fmt.Printf("Notification received.\n")
     // check last update time
     lt, kp = qm[qn]
     if kp == false || (lt.Add(10 * time.Second).Before(time.Now())) {
@@ -201,6 +211,40 @@ func (s *PostgresJobStore) ManageQueues() error {
       qm[qn] = time.Now()
     }
   }
+}
+
+func (s *PostgresJobStore) PerformMigration() error {
+	mgr := s.getMigrator()
+	err := mgr.Up()
+	if err != nil { return errors.Wrap(err, "Could not migrate database") }
+	return nil
+}
+
+func (s *PostgresJobStore) ValidateDatabase() error {
+	mgr := s.getMigrator()
+	ver, dirty, err := mgr.Version()
+	if err != nil {
+		return errors.Wrap(err, "Could not get database version")
+	}
+	if dirty {
+		return errors.Errorf("Database version %v is currently dirty.", ver)
+	}
+	if ver != PostgresDBVersion {
+		return errors.Errorf("Database version is currently %v, should be %v", ver, PostgresDBVersion)
+	}
+	return nil
+}
+
+func (s *PostgresJobStore) getMigrator() *migrate.Migrate {
+	homedir := os.Getenv("PGPQ_HOME")
+	if homedir == "" {	panic("Home directory for pgpq not specified. Please set $PGPQ_HOME.") }
+	msp := "file://" + homedir + "/db/pg"
+	pgd, err := migrate_pg.WithInstance(s.db, &migrate_pg.Config{})
+	mgr, err := migrate.NewWithDatabaseInstance(msp, "postgres", pgd)
+	if err != nil {
+		panic(errors.Wrap(err, "Could not create migration manager"))
+	}
+	return mgr
 }
 
 func (s *PostgresJobStore) updateQueueStatus(queue_name string) error {
@@ -233,3 +277,4 @@ func (s *PostgresJobStore) updateQueueStatus(queue_name string) error {
   fmt.Printf("Updating queue to %+v.\n", queue)
   return nil
 }
+

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"database/sql/driver"
 	"github.com/gorilla/mux"
+	"github.com/google/uuid"
 )
 
 type DataMap map[string]interface{}
@@ -73,6 +74,8 @@ type JobStore interface {
 	GetQueues() ([]Queue, error)
 	DeleteQueues() error
 	ManageQueues() error
+	ValidateDatabase() error
+	PerformMigration() error
 }
 
 type APIResult struct {
@@ -107,6 +110,12 @@ func StartServer(port int, store_url string) {
 		panic(err)
 	}
 
+	fmt.Printf("Validating database.\n")
+	err = store.ValidateDatabase()
+	if err != nil {
+		panic(err)
+	}
+
 	fmt.Printf("Starting manager.\n")
 	go store.ManageQueues()
 
@@ -121,6 +130,21 @@ func StartServer(port int, store_url string) {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), router))
 }
 
+func PerformMigration(store_url string) {
+	var err error
+
+	fmt.Println("Connecting to store.")
+	store, err = NewPostgresJobStore(store_url)
+	if err != nil { panic(err) }
+
+	fmt.Println("Performing migration.")
+	err = store.PerformMigration()
+	if err != nil {
+		fmt.Println("Migration failed. ", err)
+	}
+	fmt.Println("Migration finished.")
+}
+
 func EnqueueJobHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 	result := APIResult{Success: false}
@@ -133,6 +157,10 @@ func EnqueueJobHandler(w http.ResponseWriter, r *http.Request) {
 	job := Job{}
 	job.QueueName = r.FormValue("queue_name")
 	job.Quid = r.FormValue("quid")
+	// set quid if blank
+	if job.Quid == "" {
+		job.Quid = uuid.New().String()
+	}
 	job.Priority, err = strconv.ParseInt(r.FormValue("priority"), 10, 64)
 	if err != nil {
 		job.Priority = 0
