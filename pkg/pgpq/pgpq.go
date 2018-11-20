@@ -38,14 +38,14 @@ func (dm *DataMap) Scan(value interface{}) error {
 }
 
 type Queue struct {
-	ID int
-	Name string
-	Capacity int
-	JobsCount int
-	IsLocked bool
-	MinPriority *int64
-	CreatedAt *time.Time
-	UpdatedAt *time.Time
+	ID int							`json:"id"`
+	Name string					`json:"name"`
+	Capacity int				`json:"capacity"`
+	JobsCount int				`json:"jobs_count"`
+	IsLocked bool				`json:"is_locked"`
+	MinPriority *int64	`json:"min_priority"`
+	CreatedAt *time.Time	`json:"created_at"`
+	UpdatedAt *time.Time	`json:"updated_at"`
 }
 
 type Job struct {
@@ -72,6 +72,7 @@ type JobStore interface {
 	DequeueJobs(queue_name string, count int) ([]Job, error)
 	ReleaseJob(id int64) error
 	GetQueues() ([]Queue, error)
+	GetQueue(name string, update bool) (*Queue, error)
 	DeleteQueues() error
 	ManageQueues() error
 	ValidateDatabase() error
@@ -126,6 +127,7 @@ func StartServer(port int, store_url string) {
 	router.HandleFunc("/dequeue", DequeueJobsHandler).Methods("POST")
 	router.HandleFunc("/release", ReleaseJobHandler).Methods("POST")
 	router.HandleFunc("/queues", GetQueuesHandler).Methods("GET")
+	router.HandleFunc("/queue", GetQueueHandler).Methods("GET")
 	router.HandleFunc("/queues", DeleteQueuesHandler).Methods("DELETE")
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), router))
 }
@@ -264,6 +266,23 @@ func GetQueuesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result.SetData(queues)
+	result.Success = true
+}
+
+func GetQueueHandler(w http.ResponseWriter, r *http.Request) {
+	result := APIResult{Success: false}
+	defer func() {
+		writeResultToResponse(w, &result)
+	}()
+
+	name := r.FormValue("name")
+	update := r.FormValue("update") == "true"
+	queue, err := store.GetQueue(name, update)
+	if err != nil {
+		result.Error = err.(*APIError)
+		return
+	}
+	result.SetData(queue)
 	result.Success = true
 }
 

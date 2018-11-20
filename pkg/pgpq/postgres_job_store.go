@@ -171,6 +171,22 @@ func (s *PostgresJobStore) GetQueues() ([]Queue, error) {
   return queues, nil
 }
 
+func (s *PostgresJobStore) GetQueue(name string, update bool) (*Queue, error) {
+	q := new(Queue)
+	err := s.db.QueryRow("SELECT id, name, capacity, jobs_count, is_locked, min_priority, created_at, updated_at FROM queues WHERE name=$1 LIMIT 1", name).Scan(&q.ID, &q.Name, &q.Capacity, &q.JobsCount, &q.IsLocked, &q.MinPriority, &q.CreatedAt, &q.UpdatedAt)
+	if err != nil {
+		return nil, PGToAPIError(err, "Could not find queue.")
+	}
+	if update == true {
+		// need to update queue
+		err := s.updateQueueStatus(q)
+		if err != nil {
+			return nil, PGToAPIError(err, "Could not update queue status.")
+		}
+	}
+	return q, nil
+}
+
 func (s * PostgresJobStore) DeleteQueues() error {
 	_, err := s.db.Exec("DELETE FROM jobs")
 	if err != nil { return PGToAPIError(err, "Could not delete jobs.") }
@@ -204,7 +220,7 @@ func (s *PostgresJobStore) ManageQueues() error {
     // check last update time
     lt, kp = qm[qn]
     if kp == false || (lt.Add(10 * time.Second).Before(time.Now())) {
-      err = s.updateQueueStatus(qn)
+			err = s.updateQueueStatus(&Queue{Name: qn})
       if err != nil {
         fmt.Printf("Could not update queue status. %v\n", err.Error())
       }
@@ -247,14 +263,13 @@ func (s *PostgresJobStore) getMigrator() *migrate.Migrate {
 	return mgr
 }
 
-func (s *PostgresJobStore) updateQueueStatus(queue_name string) error {
-  queue := Queue{}
+func (s *PostgresJobStore) updateQueueStatus(queue *Queue) error {
   tx, err := s.db.Begin()
   if err != nil {
     return PGToAPIError(err, "Could not start transaction.")
   }
   // lock queue
-  err = tx.QueryRow("SELECT id FROM queues WHERE name=$1 AND updated_at < $2 FOR UPDATE NOWAIT", queue_name, time.Now().Add(-10 * time.Second)).Scan(&queue.ID)
+  err = tx.QueryRow("SELECT id FROM queues WHERE name=$1 AND updated_at < $2 FOR UPDATE NOWAIT", queue.Name, time.Now().Add(-10 * time.Second)).Scan(&queue.ID)
   if err != nil {
     return PGToAPIError(err, "Could not find queue.")
   }
@@ -262,7 +277,7 @@ func (s *PostgresJobStore) updateQueueStatus(queue_name string) error {
   // get count
   var count int
   var minp int
-  err = tx.QueryRow("SELECT COUNT(*), COALESCE(MIN(priority), 0) FROM jobs WHERE jobs.queue_name=$1", queue_name).Scan(&count, &minp)
+  err = tx.QueryRow("SELECT COUNT(*), COALESCE(MIN(priority), 0) FROM jobs WHERE jobs.queue_name=$1", queue.Name).Scan(&count, &minp)
   if err != nil { return PGToAPIError(err, "Could not fetch job count.") }
 
   // write count, priority to queue
