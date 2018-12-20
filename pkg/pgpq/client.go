@@ -22,7 +22,7 @@ func NewClient(url string) *Client {
 	return &c
 }
 
-func (c *Client) EnqueueJob(job *Job) error {
+func (c *Client) EnqueueJob(job *Job) (*APIResult, error) {
 	hc := c.HttpClient
 	url := fmt.Sprintf("%s/enqueue", c.HostUrl)
 	data := nurl.Values{}
@@ -31,22 +31,37 @@ func (c *Client) EnqueueJob(job *Job) error {
 	data.Set("priority", strconv.FormatInt(job.Priority, 10))
 	if job.Data != nil {
 		djs, err := json.Marshal(job.Data)
-		if err != nil { return err }
+		if err != nil { return nil, err }
 		data.Set("data", string(djs))
 	}
 	resp, err := hc.PostForm(url, data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	res, err := parseResult(resp)
 	if err != nil {
-		return err
+		return res, err
 	}
 
 	err = json.Unmarshal(res.Data, job)
-	if err != nil { return err }
-	return nil
+	if err != nil { return res, err }
+	return res, nil
+}
+
+func (c *Client) EnqueueJobs(jobs []*Job) (*APIResult, error) {
+	hc := c.HttpClient
+	url := fmt.Sprintf("%s/enqueues", c.HostUrl)
+	data := nurl.Values{}
+	jjsn, err := json.Marshal(jobs)
+	data.Set("jobs", string(jjsn))
+	resp, err := hc.PostForm(url, data)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	res, err := parseResult(resp)
+	return res, err
 }
 
 func (c *Client) DequeueJobs(queue_name string, count int) ([]Job, error) {

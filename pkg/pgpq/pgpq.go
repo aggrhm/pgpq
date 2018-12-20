@@ -2,7 +2,6 @@ package pgpq
 
 import (
 	"fmt"
-	"log"
 	"time"
 	"errors"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 	"database/sql/driver"
 	"github.com/gorilla/mux"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 type DataMap map[string]interface{}
@@ -59,11 +59,27 @@ type Job struct {
 	CreatedAt *time.Time `json:"created_at,omitempty"`
 }
 
+func NewJob() *Job {
+	now := time.Now()
+	j := &Job{}
+	j.Quid = uuid.New().String()
+	j.Priority = 0
+	j.State = 10
+	j.StateChangedAt = &now
+	j.CreatedAt = &now
+	return j
+}
+
 func (j *Job) ParseDataJSON(ds string) error {
 	var m map[string]interface{}
 	err := json.Unmarshal([]byte(ds), &m)
 	j.Data = m
 	return err
+}
+
+func (j *Job) SetDataValue(key string, val interface{}) {
+	if j.Data == nil { j.Data = make(map[string]interface{}) }
+	j.Data[key] = val
 }
 
 type JobStore interface {
@@ -99,8 +115,13 @@ func (err *APIError) Error() string {
 }
 
 var (
+	log = logrus.New()
 	store JobStore
 )
+
+func SetLogger(l *logrus.Logger) {
+	log = l
+}
 
 func StartServer(port int, store_url string) {
 	var err error
@@ -123,6 +144,7 @@ func StartServer(port int, store_url string) {
 	fmt.Printf("Starting server.\n")
 	router := mux.NewRouter()
 	router.HandleFunc("/enqueue", EnqueueJobHandler).Methods("POST")
+	router.HandleFunc("/enqueues", EnqueueJobsHandler).Methods("POST")
 	router.HandleFunc("/peek", PeekJobsHandler).Methods("GET")
 	router.HandleFunc("/dequeue", DequeueJobsHandler).Methods("POST")
 	router.HandleFunc("/release", ReleaseJobHandler).Methods("POST")
@@ -150,23 +172,16 @@ func PerformMigration(store_url string) {
 func EnqueueJobHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
 	result := APIResult{Success: false}
-	now := time.Now()
 	defer func() {
 		writeResultToResponse(w, &result)
 	}()
 
 	// build job
-	job := Job{}
+	job := NewJob()
 	job.QueueName = r.FormValue("queue_name")
-	job.Quid = r.FormValue("quid")
-	// set quid if blank
-	if job.Quid == "" {
-		job.Quid = uuid.New().String()
-	}
+	quid := r.FormValue("quid")
+	if quid != "" { job.Quid = quid }
 	job.Priority, err = strconv.ParseInt(r.FormValue("priority"), 10, 64)
-	if err != nil {
-		job.Priority = 0
-	}
 	if ds := r.FormValue("data"); ds != "" {
 		err := job.ParseDataJSON(ds)
 		if err != nil {
@@ -174,18 +189,52 @@ func EnqueueJobHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	job.State = 10
-	job.StateChangedAt = &now
-	job.CreatedAt = &now
 
 	// enqueue job
-	err = store.EnqueueJob(&job)
+	err = store.EnqueueJob(job)
 	if err != nil {
 		result.Error = err.(*APIError)
 		return
 	}
 	result.SetData(job)
 	result.Success = true
+}
+
+func EnqueueJobsHandler(w http.ResponseWriter, r *http.Request) {
+	var err error
+	result := APIResult{Success: false}
+	resdata := make([]interface{}, 0)
+	defer func() {
+		writeResultToResponse(w, &result)
+	}()
+
+	jobsds := r.FormValue("jobs")
+	var jobsd []interface{}
+	err = json.Unmarshal([]byte(jobsds), &jobsd)
+	for _, jobd := range jobsd {
+		jdm := jobd.(map[string]interface{})
+		job := NewJob()
+		job.QueueName, _ = jdm["queue_name"].(string)
+		if quid, ok := jdm["quid"].(string); ok {
+			job.Quid = quid
+		}
+		if pr, ok := jdm["priority"].(float64); ok {
+			job.Priority = int64(pr)
+		}
+		if data, ok := jdm["data"].(map[string]interface{}); ok {
+			job.Data = data
+		}
+		err = store.EnqueueJob(job)
+		if err != nil {
+			apierr := fmt.Errorf("Job error: %+v, %v", jdm, err)
+			resdata = append(resdata, apierr)
+			result.Error = err.(*APIError)
+			continue
+		}
+		resdata = append(resdata, job)
+	}
+	result.SetData(resdata)
+	result.Success = (result.Error == nil)
 }
 
 func PeekJobsHandler(w http.ResponseWriter, r *http.Request) {

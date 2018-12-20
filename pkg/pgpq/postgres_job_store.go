@@ -64,25 +64,14 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
     return &APIError{Message: "Queue is full and new job has too low priority.", Type: "QueueFull"}
   }
 
-  // insert row
-  job_updated := false
-  err = s.db.QueryRow("INSERT INTO jobs(queue_name, quid, priority, data, state, created_at) VALUES($1, $2, $3, $4, $5, $6) RETURNING id", job.QueueName, job.Quid, job.Priority, job.Data, job.State, job.CreatedAt).Scan(&job.ID)
+  // insert job row
+  err = s.db.QueryRow("INSERT INTO jobs(queue_name, quid, priority, data, state, created_at) VALUES($1, $2, $3, $4, $5, $6) ON CONFLICT (queue_name, quid) DO UPDATE SET priority=GREATEST(jobs.priority, EXCLUDED.priority), data=EXCLUDED.data RETURNING id, priority, data", job.QueueName, job.Quid, job.Priority, job.Data, job.State, job.CreatedAt).Scan(&job.ID, &job.Priority, &job.Data)
   if err != nil {
-    pe := err.(*pq.Error)
-    if pe.Code.Name() == "unique_violation" {
-      // if already in queue, update
-      err = s.db.QueryRow("UPDATE jobs SET priority=$1, data=$2 WHERE queue_name=$3 AND quid=$4 RETURNING id", job.Priority, job.Data, job.QueueName, job.Quid).Scan(&job.ID)
-      if err != nil {
-        return PGToAPIError(err, "")
-      }
-      job_updated = true
-    } else {
-      return PGToAPIError(err, "")
-    }
+		return PGToAPIError(err, "")
   }
 
   // delete lower job if needed
-  if queue.IsLocked == true && !job_updated {
+  if queue.IsLocked == true {
     _, err := s.db.Exec("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC LIMIT 1)", queue.Name)
     if err != nil {
       return PGToAPIError(err, "")
@@ -253,6 +242,7 @@ func (s *PostgresJobStore) ValidateDatabase() error {
 
 func (s *PostgresJobStore) getMigrator() *migrate.Migrate {
 	homedir := os.Getenv("PGPQ_HOME")
+	//fmt.Println("homedir: ", homedir)
 	if homedir == "" {	panic("Home directory for pgpq not specified. Please set $PGPQ_HOME.") }
 	msp := "file://" + homedir + "/db/pg"
 	pgd, err := migrate_pg.WithInstance(s.db, &migrate_pg.Config{})
