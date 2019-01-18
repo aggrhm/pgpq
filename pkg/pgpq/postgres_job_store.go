@@ -72,7 +72,7 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
 
   // delete lower job if needed
   if queue.IsLocked == true {
-    _, err := s.db.Exec("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC LIMIT 1)", queue.Name)
+    _, err := s.db.Exec("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT 1)", queue.Name)
     if err != nil {
       return PGToAPIError(err, "")
     }
@@ -85,7 +85,7 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
 
 func (s * PostgresJobStore) PeekJobs(queue_name string, count int) ([]Job, error) {
   var jobs = make([]Job, 0, count)
-  rows, err := s.db.Query("SELECT id, queue_name, quid, priority, data, state, created_at FROM jobs WHERE queue_name = $1 ORDER BY priority DESC LIMIT $2", queue_name, count)
+  rows, err := s.db.Query("SELECT id, queue_name, quid, priority, data, state, created_at FROM jobs WHERE queue_name = $1 ORDER BY priority DESC NULLS LAST LIMIT $2", queue_name, count)
   if err != nil {
     return nil, PGToAPIError(err, "")
   }
@@ -108,7 +108,7 @@ func (s * PostgresJobStore) PeekJobs(queue_name string, count int) ([]Job, error
 func (s * PostgresJobStore) DequeueJobs(queue_name string, count int) ([]Job, error) {
   var jobs = make([]Job, 0, count)
   now := time.Now()
-  rows, err := s.db.Query("UPDATE jobs SET state=20, state_changed_at=$1 WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$2 AND (jobs.state = 10 OR (jobs.state=20 AND jobs.state_changed_at < $3)) ORDER BY priority DESC LIMIT $4 FOR UPDATE SKIP LOCKED) RETURNING id, queue_name, quid, priority, data", now, queue_name, now.Add(time.Minute * -1), count)
+  rows, err := s.db.Query("UPDATE jobs SET state=20, state_changed_at=$1 WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$2 AND (jobs.state = 10 OR (jobs.state=20 AND jobs.state_changed_at < $3)) ORDER BY priority DESC NULLS LAST LIMIT $4 FOR UPDATE SKIP LOCKED) RETURNING id, queue_name, quid, priority, data", now, queue_name, now.Add(time.Minute * -1), count)
   if err != nil {
     return nil, PGToAPIError(err, "Job update error: ")
   }
