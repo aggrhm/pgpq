@@ -1,2 +1,4 @@
 .vimsession
 vendor/
+bin/
+dist/
