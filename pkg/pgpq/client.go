@@ -104,6 +104,22 @@ func (c *Client) ReleaseJob(job_id int64) error {
 	return nil
 }
 
+func (c *Client) GetQueue(name string, update bool) (*Queue, error) {
+	queue := new(Queue)
+	hc := c.HttpClient
+	updstr := "false"
+	if update { updstr = "true" }
+	url := fmt.Sprintf("%s/queue?name=%s&update=%s", c.HostUrl, name, updstr)
+	resp, err := hc.Get(url)
+	if err != nil { return nil, err }
+	defer resp.Body.Close()
+	res, err := parseResult(resp)
+	if err != nil { return nil, err }
+	err = json.Unmarshal(res.Data, &queue)
+	if err != nil { return queue, err }
+	return queue, nil
+}
+
 func parseResult(resp *http.Response) (*APIResult, error) {
 	res := APIResult{}
 	body, err := ioutil.ReadAll(resp.Body)

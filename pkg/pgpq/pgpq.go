@@ -151,7 +151,14 @@ func StartServer(port int, store_url string) {
 	router.HandleFunc("/queues", GetQueuesHandler).Methods("GET")
 	router.HandleFunc("/queue", GetQueueHandler).Methods("GET")
 	router.HandleFunc("/queues", DeleteQueuesHandler).Methods("DELETE")
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), router))
+
+	srv := &http.Server{
+		Handler: router,
+		Addr: fmt.Sprintf(":%v", port),
+		WriteTimeout: 10 * time.Second,
+		ReadTimeout: 10 * time.Second,
+	}
+	log.Fatal(srv.ListenAndServe())
 }
 
 func PerformMigration(store_url string) {
