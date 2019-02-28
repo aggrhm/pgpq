@@ -40,6 +40,7 @@ func NewPostgresJobStore(url string) (*PostgresJobStore,error) {
 
 func PGToAPIError(err error, prefix string) *APIError {
   msg := fmt.Sprintf("%s%s", prefix, err.Error())
+	log.Error(prefix, err)
   return &APIError{Message: msg, Type: "StoreError"}
 }
 
@@ -67,20 +68,21 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
 
   // insert job row
 	tx, err := s.db.Begin()
-	if err != nil { return PGToAPIError(err, "Could not start transaction.") }
+	if err != nil { rollbackTx(tx); return PGToAPIError(err, "Could not start transaction.") }
 
   err = tx.QueryRow("INSERT INTO jobs(queue_name, quid, priority, data, state, created_at) VALUES($1, $2, $3, $4, $5, $6) ON CONFLICT (queue_name, quid) DO UPDATE SET priority=GREATEST(jobs.priority, EXCLUDED.priority), data=EXCLUDED.data RETURNING id, priority, data", job.QueueName, job.Quid, job.Priority, job.Data, job.State, job.CreatedAt).Scan(&job.ID, &job.Priority, &job.Data)
-  if err != nil { return PGToAPIError(err, "") }
+  if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
 
   if queue.IsFull() {
 		// delete lower job if needed
 		var new_min_pri int
     err = tx.QueryRow("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT 1) RETURNING priority", queue.Name).Scan(&new_min_pri)
-    if err != nil { return PGToAPIError(err, "") }
+    if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
 		err = tx.QueryRow("UPDATE queues SET min_priority=$1 WHERE id = $2 RETURNING min_priority", new_min_pri, queue.ID).Scan(&queue.MinPriority)
   } else {
 		// increment queue jobs count
 		_, err = tx.Exec("UPDATE queues SET jobs_count = jobs_count + 1 WHERE id = $1", queue.ID)
+    if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
 	}
 
 	// commit
@@ -140,10 +142,10 @@ func (s * PostgresJobStore) ReleaseJob(id int64) error {
   tx, err := s.db.Begin()
   if err != nil { return PGToAPIError(err, "Could not start transaction.") }
   err = tx.QueryRow("DELETE FROM jobs WHERE id=$1 RETURNING id, queue_name", id).Scan(&job.ID, &job.QueueName)
-  if err != nil { return PGToAPIError(err, "") }
+  if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
 
 	_, err = tx.Exec("UPDATE queues SET jobs_count = jobs_count - 1 WHERE name = $1", job.QueueName)
-  if err != nil { return PGToAPIError(err, "") }
+  if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
 
 	err = tx.Commit()
   if err != nil { return PGToAPIError(err, "Could not commit transaction.") }
@@ -253,12 +255,57 @@ func (s *PostgresJobStore) getMigrator() *migrate.Migrate {
 	return mgr
 }
 
+func (s *PostgresJobStore) CleanQueue(queue * Queue) error {
+	var del_count int64
+
+	log.Debugf("Cleaning queue %v", queue.Name)
+	tstart := time.Now()
+  tx, err := s.db.Begin()
+  if err != nil { return PGToAPIError(err, "Could not start transaction.")
+	}
+
+	// try to lock queue if full
+	err = tx.QueryRow("UPDATE queues SET is_locked = 't' WHERE id=$1 AND is_locked='f' AND jobs_count > capacity RETURNING jobs_count, capacity", queue.ID).Scan(&queue.JobsCount, &queue.Capacity)
+	if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
+
+	overflow := queue.JobsCount - queue.Capacity
+
+	// delete any old jobs for queue
+	res, err := tx.Exec("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT $2)", queue.Name, overflow)
+	if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
+
+	del_count, err = res.RowsAffected()
+	if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
+	if del_count == 0 { rollbackTx(tx); return nil }
+
+	// get lowest priority job
+	err = tx.QueryRow("SELECT priority FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT 1", queue.Name).Scan(&queue.MinPriority)
+	if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
+
+	// update queue
+	_, err = tx.Exec("UPDATE queues SET min_priority=$1, jobs_count = (jobs_count - $2), is_locked = 'f', updated_At = $3, WHERE id = $4", queue.MinPriority, del_count, time.Now(), queue.ID)
+	if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
+
+	// commit
+	err = tx.Commit()
+	if err != nil { return PGToAPIError(err, "Could not commit transaction.") }
+
+	log.Infof("Cleaned %v jobs from queue %v (took %s)", del_count, queue.Name, time.Now().Sub(tstart).String())
+	return nil
+}
+
+func rollbackTx(tx *sql.Tx) {
+	err := tx.Rollback()
+	if err != nil {
+		log.Error("Could not rollback transaction")
+	}
+}
+
+// deprecated
 func (s *PostgresJobStore) updateQueueStatus(queue *Queue) error {
 	tstart := time.Now()
   tx, err := s.db.Begin()
-  if err != nil {
-    return PGToAPIError(err, "Could not start transaction.")
-  }
+  if err != nil { return PGToAPIError(err, "Could not start transaction.") }
   // lock queue
   err = tx.QueryRow("SELECT id FROM queues WHERE name=$1 AND updated_at < $2 FOR UPDATE NOWAIT", queue.Name, time.Now().Add(-10 * time.Second)).Scan(&queue.ID)
   if err != nil {
