@@ -76,8 +76,8 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
   if queue.IsFull() {
 		// delete lower job if needed
 		var new_min_pri int
-    err = tx.QueryRow("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT 1) RETURNING priority", queue.Name).Scan(&new_min_pri)
-    if err != nil { rollbackTx(tx); return PGToAPIError(err, "") }
+    err = tx.QueryRow("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING priority", queue.Name).Scan(&new_min_pri)
+    if err != nil { rollbackTx(tx); return PGToAPIError(err, "enqueue delete") }
 		err = tx.QueryRow("UPDATE queues SET min_priority=$1 WHERE id = $2 RETURNING min_priority", new_min_pri, queue.ID).Scan(&queue.MinPriority)
   } else {
 		// increment queue jobs count
