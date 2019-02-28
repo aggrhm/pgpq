@@ -48,6 +48,10 @@ type Queue struct {
 	UpdatedAt *time.Time	`json:"updated_at"`
 }
 
+func (q *Queue) IsFull() bool {
+	return q.JobsCount >= q.Capacity
+}
+
 type Job struct {
 	ID int64						`json:"id"`
 	QueueName string		`json:"queue_name"`
@@ -138,8 +142,8 @@ func StartServer(port int, store_url string) {
 		panic(err)
 	}
 
-	fmt.Printf("Starting manager.\n")
-	go store.ManageQueues()
+	//fmt.Printf("Starting manager.\n")
+	//go store.ManageQueues()
 
 	fmt.Printf("Starting server.\n")
 	router := mux.NewRouter()

@@ -23,4 +23,4 @@ CREATE UNLOGGED TABLE jobs (
 CREATE INDEX jobs_priority_idx ON jobs (queue_name, priority DESC NULLS LAST);
 CREATE UNIQUE INDEX jobs_quid_idx ON jobs (queue_name, quid);
 
-CREATE UNIQUE INDEX queues_name_idx ON queues (name, is_locked, min_priority);
+CREATE UNIQUE INDEX queues_name_idx ON queues (name);

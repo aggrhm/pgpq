@@ -46,12 +46,13 @@ func PGToAPIError(err error, prefix string) *APIError {
 func (s *PostgresJobStore) EnqueueJob(job *Job) error {
 	//fmt.Printf("Data: %v\n", job.Data)
   queue := Queue{}
+
   // check if queue empty
-  err := s.db.QueryRow("SELECT is_locked, COALESCE(min_priority, 0) FROM queues WHERE name = $1 LIMIT 1", job.QueueName).Scan(&queue.IsLocked, &queue.MinPriority)
+  err := s.db.QueryRow("SELECT jobs_count, capacity, min_priority FROM queues WHERE name = $1 LIMIT 1", job.QueueName).Scan(&queue.JobsCount, &queue.Capacity, &queue.MinPriority)
   if err != nil {
     if err == sql.ErrNoRows {
       // create new queue
-      err = s.db.QueryRow("INSERT INTO queues(name, capacity, created_at, updated_at) VALUES($1, $2, $3, $3) RETURNING id, name, is_locked", job.QueueName, 100000, time.Now()).Scan(&queue.ID, &queue.Name, &queue.IsLocked)
+      err = s.db.QueryRow("INSERT INTO queues(name, capacity, created_at, updated_at) VALUES($1, $2, $3, $3) RETURNING id, name", job.QueueName, 1000000, time.Now()).Scan(&queue.ID, &queue.Name)
       if err != nil {
         return PGToAPIError(err, "")
       }
@@ -60,25 +61,31 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
     }
   }
 
-  if queue.IsLocked == true && queue.MinPriority != nil && job.Priority <= *queue.MinPriority {
+  if queue.IsFull() && queue.MinPriority != nil && job.Priority <= *queue.MinPriority {
     return &APIError{Message: "Queue is full and new job has too low priority.", Type: "QueueFull"}
   }
 
   // insert job row
-  err = s.db.QueryRow("INSERT INTO jobs(queue_name, quid, priority, data, state, created_at) VALUES($1, $2, $3, $4, $5, $6) ON CONFLICT (queue_name, quid) DO UPDATE SET priority=GREATEST(jobs.priority, EXCLUDED.priority), data=EXCLUDED.data RETURNING id, priority, data", job.QueueName, job.Quid, job.Priority, job.Data, job.State, job.CreatedAt).Scan(&job.ID, &job.Priority, &job.Data)
-  if err != nil {
-		return PGToAPIError(err, "")
-  }
+	tx, err := s.db.Begin()
+	if err != nil { return PGToAPIError(err, "Could not start transaction.") }
 
-  // delete lower job if needed
-  if queue.IsLocked == true {
-    _, err := s.db.Exec("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT 1)", queue.Name)
-    if err != nil {
-      return PGToAPIError(err, "")
-    }
-  }
+  err = tx.QueryRow("INSERT INTO jobs(queue_name, quid, priority, data, state, created_at) VALUES($1, $2, $3, $4, $5, $6) ON CONFLICT (queue_name, quid) DO UPDATE SET priority=GREATEST(jobs.priority, EXCLUDED.priority), data=EXCLUDED.data RETURNING id, priority, data", job.QueueName, job.Quid, job.Priority, job.Data, job.State, job.CreatedAt).Scan(&job.ID, &job.Priority, &job.Data)
+  if err != nil { return PGToAPIError(err, "") }
 
-  s.NotifyJobsUpdated(job.QueueName)
+  if queue.IsFull() {
+		// delete lower job if needed
+		var new_min_pri int
+    err = tx.QueryRow("DELETE FROM jobs WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$1 ORDER BY priority ASC NULLS FIRST LIMIT 1) RETURNING priority", queue.Name).Scan(&new_min_pri)
+    if err != nil { return PGToAPIError(err, "") }
+		err = tx.QueryRow("UPDATE queues SET min_priority=$1 WHERE id = $2 RETURNING min_priority", new_min_pri, queue.ID).Scan(&queue.MinPriority)
+  } else {
+		// increment queue jobs count
+		_, err = tx.Exec("UPDATE queues SET jobs_count = jobs_count + 1 WHERE id = $1", queue.ID)
+	}
+
+	// commit
+	err = tx.Commit()
+	if err != nil { return PGToAPIError(err, "Could not commit transaction.") }
 
   return nil
 }
@@ -130,11 +137,16 @@ func (s * PostgresJobStore) DequeueJobs(queue_name string, count int) ([]Job, er
 
 func (s * PostgresJobStore) ReleaseJob(id int64) error {
   job := Job{}
-  err := s.db.QueryRow("DELETE FROM jobs WHERE id=$1 RETURNING id, queue_name", id).Scan(&job.ID, &job.QueueName)
-  if err != nil {
-    return PGToAPIError(err, "")
-  }
-  s.NotifyJobsUpdated(job.QueueName)
+  tx, err := s.db.Begin()
+  if err != nil { return PGToAPIError(err, "Could not start transaction.") }
+  err = tx.QueryRow("DELETE FROM jobs WHERE id=$1 RETURNING id, queue_name", id).Scan(&job.ID, &job.QueueName)
+  if err != nil { return PGToAPIError(err, "") }
+
+	_, err = tx.Exec("UPDATE queues SET jobs_count = jobs_count - 1 WHERE name = $1", job.QueueName)
+  if err != nil { return PGToAPIError(err, "") }
+
+	err = tx.Commit()
+  if err != nil { return PGToAPIError(err, "Could not commit transaction.") }
   return nil
 }
 
@@ -182,18 +194,6 @@ func (s * PostgresJobStore) DeleteQueues() error {
 	_, err = s.db.Exec("DELETE FROM queues")
 	if err != nil { return PGToAPIError(err, "Could not delete jobs.") }
 	return nil
-}
-
-func (s *PostgresJobStore) NotifyJobsUpdated(queue_name string) error {
-  /*
-  _, err = s.db.Exec("SELECT pg_notify('jobs_updated',$1)", queue_name)
-  if err != nil {
-    fmt.Printf("Notify error.")
-    return PGToAPIError(err)
-  }
-  */
-  s.notifs <- queue_name
-  return nil
 }
 
 func (s *PostgresJobStore) ManageQueues() error {
@@ -254,6 +254,7 @@ func (s *PostgresJobStore) getMigrator() *migrate.Migrate {
 }
 
 func (s *PostgresJobStore) updateQueueStatus(queue *Queue) error {
+	tstart := time.Now()
   tx, err := s.db.Begin()
   if err != nil {
     return PGToAPIError(err, "Could not start transaction.")
@@ -261,7 +262,7 @@ func (s *PostgresJobStore) updateQueueStatus(queue *Queue) error {
   // lock queue
   err = tx.QueryRow("SELECT id FROM queues WHERE name=$1 AND updated_at < $2 FOR UPDATE NOWAIT", queue.Name, time.Now().Add(-10 * time.Second)).Scan(&queue.ID)
   if err != nil {
-    return PGToAPIError(err, "Could not find queue.")
+    return PGToAPIError(err, "Could not load queue. It might be processed by another thread.")
   }
 
   // get count
@@ -279,7 +280,8 @@ func (s *PostgresJobStore) updateQueueStatus(queue *Queue) error {
   err = tx.Commit()
   if err != nil { return PGToAPIError(err, "Could not commit transaction.") }
 
-  fmt.Printf("Updating queue to %+v.\n", queue)
+	tend := time.Now()
+  fmt.Printf("Updating queue to %+v (took %v).\n", queue, tend.Sub(tstart).String())
   return nil
 }
 
