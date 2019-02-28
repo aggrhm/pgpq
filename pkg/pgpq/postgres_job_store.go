@@ -48,7 +48,7 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
   queue := Queue{}
 
   // check if queue empty
-  err := s.db.QueryRow("SELECT jobs_count, capacity, min_priority FROM queues WHERE name = $1 LIMIT 1", job.QueueName).Scan(&queue.JobsCount, &queue.Capacity, &queue.MinPriority)
+  err := s.db.QueryRow("SELECT id, name, jobs_count, capacity, min_priority FROM queues WHERE name = $1 LIMIT 1", job.QueueName).Scan(&queue.ID, &queue.Name, &queue.JobsCount, &queue.Capacity, &queue.MinPriority)
   if err != nil {
     if err == sql.ErrNoRows {
       // create new queue
