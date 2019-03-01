@@ -64,14 +64,15 @@ type Job struct {
 }
 
 func NewJob() *Job {
-	now := time.Now()
 	j := &Job{}
-	j.Quid = uuid.New().String()
-	j.Priority = 0
-	j.State = 10
-	j.StateChangedAt = &now
-	j.CreatedAt = &now
 	return j
+}
+
+func (j *Job) Prepare() error {
+	if j.Quid == "" {
+		j.Quid = uuid.New().String()
+	}
+	return nil
 }
 
 func (j *Job) ParseDataJSON(ds string) error {
