@@ -90,7 +90,7 @@ func (j *Job) SetDataValue(key string, val interface{}) {
 type JobStore interface {
 	EnqueueJob(job *Job) error
 	PeekJobs(queue_name string, count int) ([]Job, error)
-	DequeueJobs(queue_name string, count int) ([]Job, error)
+	DequeueJobs(queue_name string, count int, timeout time.Duration) ([]Job, error)
 	ReleaseJob(id int64) error
 	GetQueues() ([]Queue, error)
 	GetQueue(name string, update bool) (*Queue, error)
@@ -279,14 +279,28 @@ func DequeueJobsHandler(w http.ResponseWriter, r *http.Request) {
 		writeResultToResponse(w, &result)
 	}()
 
+	// queue name
 	queue_name := r.FormValue("queue_name")
+	// count
 	count, err := strconv.Atoi(r.FormValue("count"))
 	if err != nil {
 		result.Error = &APIError{Message: "Invalid count parameter.", Type: "InvalidParam"}
 		return
 	}
+	// timeout
+	timeout := time.Minute * 1
+	timeout_s := r.FormValue("timeout")
+	if timeout_s != "" {
+		timeout_i, err := strconv.Atoi(timeout_s)
+		if err != nil {
+			result.Error = &APIError{Message: "Invalid timeout parameter.", Type: "InvalidParam"}
+			return
+		}
+		timeout = time.Second * time.Duration(timeout_i)
+	}
 
-	jobs, err := store.DequeueJobs(queue_name, count)
+
+	jobs, err := store.DequeueJobs(queue_name, count, timeout)
 	if (err != nil) {
 		result.Error = err.(*APIError)
 		return

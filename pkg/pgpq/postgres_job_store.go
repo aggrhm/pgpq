@@ -120,10 +120,14 @@ func (s * PostgresJobStore) PeekJobs(queue_name string, count int) ([]Job, error
 	return jobs, nil
 }
 
-func (s * PostgresJobStore) DequeueJobs(queue_name string, count int) ([]Job, error) {
+func (s * PostgresJobStore) DequeueJobs(queue_name string, count int, timeout time.Duration) ([]Job, error) {
 	var jobs = make([]Job, 0, count)
+	// check timeout
+	if timeout < time.Minute {
+		timeout = time.Minute
+	}
 	now := time.Now()
-	rows, err := s.db.Query("UPDATE jobs SET state=20, state_changed_at=$1 WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$2 AND (jobs.state = 10 OR (jobs.state=20 AND jobs.state_changed_at < $3)) ORDER BY priority DESC NULLS LAST LIMIT $4 FOR UPDATE SKIP LOCKED) RETURNING id, queue_name, quid, priority, data", now, queue_name, now.Add(time.Minute * -1), count)
+	rows, err := s.db.Query("UPDATE jobs SET state=20, state_changed_at=$1 WHERE id IN (SELECT id FROM jobs WHERE jobs.queue_name=$2 AND (jobs.state = 10 OR (jobs.state=20 AND jobs.state_changed_at < $3)) ORDER BY priority DESC NULLS LAST LIMIT $4 FOR UPDATE SKIP LOCKED) RETURNING id, queue_name, quid, priority, data", now, queue_name, now.Add(timeout * -1), count)
 	if err != nil {
 		return nil, PGToAPIError(err, "Job update error: ")
 	}

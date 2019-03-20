@@ -64,7 +64,7 @@ func (c *Client) EnqueueJobs(jobs []*Job) (*APIResult, error) {
 	return res, err
 }
 
-func (c *Client) DequeueJobs(queue_name string, count int) ([]Job, error) {
+func (c *Client) DequeueJobs(queue_name string, count int, timeout time.Duration) ([]Job, error) {
 	jobs := make([]Job, 0, count)
 
 	hc := c.HttpClient
@@ -72,6 +72,9 @@ func (c *Client) DequeueJobs(queue_name string, count int) ([]Job, error) {
 	data := nurl.Values{}
 	data.Set("queue_name", queue_name)
 	data.Set("count", strconv.Itoa(count))
+	if timeout > 0 {
+		data.Set("timeout", strconv.Itoa(int(timeout.Seconds())))
+	}
 	resp, err := hc.PostForm(url, data)
 	if err != nil {
 		return jobs, err
