@@ -90,7 +90,7 @@ func (j *Job) SetDataValue(key string, val interface{}) {
 type JobStore interface {
 	EnqueueJob(job *Job) error
 	PeekJobs(queue_name string, count int) ([]Job, error)
-	DequeueJobs(queue_name string, count int, timeout time.Duration) ([]Job, error)
+	DequeueJobs(queue_name string, count int, timeout time.Duration, min_priority *int64) ([]Job, error)
 	ReleaseJob(id int64) error
 	GetQueues() ([]Queue, error)
 	GetQueue(name string, update bool) (*Queue, error)
@@ -298,9 +298,19 @@ func DequeueJobsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		timeout = time.Second * time.Duration(timeout_i)
 	}
+	// min priority
+	var min_pri *int64
+	min_pri_s := r.FormValue("min_priority")
+	if min_pri_s != "" {
+		val, err := strconv.ParseInt(min_pri_s, 10, 64)
+		if err != nil {
+			result.Error = &APIError{Message: "Invalid min_priority parameter.", Type: "InvalidParam"}
+			return
+		}
+		min_pri = &val
+	}
 
-
-	jobs, err := store.DequeueJobs(queue_name, count, timeout)
+	jobs, err := store.DequeueJobs(queue_name, count, timeout, min_pri)
 	if (err != nil) {
 		result.Error = err.(*APIError)
 		return
