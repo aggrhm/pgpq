@@ -52,6 +52,13 @@ func (q *Queue) IsFull() bool {
 	return q.JobsCount >= q.Capacity
 }
 
+func (q *Queue) PercentFull() float32 {
+	jc := q.JobsCount
+	cp := q.Capacity
+	if cp == 0 { return 0 }
+	return float32(jc) / float32(cp)
+}
+
 type Job struct {
 	ID int64						`json:"id"`
 	QueueName string		`json:"queue_name"`

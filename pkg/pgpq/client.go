@@ -10,15 +10,22 @@ import (
 	"encoding/json"
 )
 
+type QueueCacheEntry struct {
+	Queue				*Queue
+	UpdatedAt		time.Time
+}
+
 type Client struct {
-	HostUrl string
-	HttpClient *http.Client
+	HostUrl			string
+	HttpClient	*http.Client
+	QueueCache	map[string]*QueueCacheEntry
 }
 
 func NewClient(url string) *Client {
 	c := Client{}
 	c.HostUrl = url
 	c.HttpClient = &http.Client{Timeout: (15 * time.Second)}
+	c.QueueCache = make(map[string]*QueueCacheEntry)
 	return &c
 }
 
@@ -120,6 +127,20 @@ func (c *Client) GetQueue(name string, update bool) (*Queue, error) {
 	if err != nil { return nil, err }
 	err = json.Unmarshal(res.Data, &queue)
 	if err != nil { return queue, err }
+	return queue, nil
+}
+
+func (c *Client) GetCachedQueue(name string, staled time.Duration) (*Queue, error) {
+	cache := c.QueueCache
+	// check if cached
+	qe := cache[name]
+	if qe != nil && qe.UpdatedAt.After(time.Now().Add(-1 * staled)) {
+		return qe.Queue, nil
+	}
+	// otherwise, fetch queue
+	queue, err := c.GetQueue(name, false)
+	if err != nil { return nil, err }
+	cache[name] = &QueueCacheEntry{Queue: queue, UpdatedAt: time.Now()}
 	return queue, nil
 }
 
