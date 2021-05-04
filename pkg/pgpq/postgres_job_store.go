@@ -56,7 +56,7 @@ func (s *PostgresJobStore) EnqueueJob(job *Job) error {
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// create new queue
-			err = s.db.QueryRow("INSERT INTO queues(name, capacity, created_at, updated_at) VALUES($1, $2, $3, $3) RETURNING id, name", job.QueueName, 1000000, time.Now()).Scan(&queue.ID, &queue.Name)
+			err = s.db.QueryRow("INSERT INTO queues(name, capacity, created_at, updated_at) VALUES($1, $2, $3, $3) RETURNING id, name, capacity", job.QueueName, 1000000, time.Now()).Scan(&queue.ID, &queue.Name, &queue.Capacity)
 			if err != nil {
 				return PGToAPIError(err, "")
 			}
